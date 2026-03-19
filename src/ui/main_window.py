@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                                QFileDialog, QListWidget, QAbstractItemView, QMessageBox, QApplication, QProgressDialog, QDialog, QPlainTextEdit)
 from PySide6.QtGui import QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import Qt, QUrl, QThread, Signal
+from PySide6.QtCore import Qt, QUrl
 import pandas as pd
 import sys
 import os
@@ -14,199 +14,10 @@ import threading
 
 import ciga
 from ciga import TGraph
-from ciga.utils import prepare_data, agg_weights
-from ciga.analysis import tgraph_degree, tgraph_betweenness, tgraph_closeness, tgraph_eigenvector_centrality
-from ciga.analysis.tgraph_community_analysis import tgraph_community_leiden, tgraph_community_multilevel, tgraph_community_label_propagation
-from ciga.analysis.tgraph_properties import tgraph_density, tgraph_transitivity_undirected, tgraph_is_connected, tgraph_diameter, tgraph_reciprocity
 
-class NetworkWorker(QThread):
-    finished = Signal(object, object)  # tgraph, error_message
-
-    def __init__(self, df_raw, source_col, target_col, selected_positions, weight_col):
-        super().__init__()
-        self.df_raw = df_raw
-        self.source_col = source_col
-        self.target_col = target_col
-        self.selected_positions = selected_positions
-        self.weight_col = weight_col
-
-    def run(self):
-        try:
-            df_working = self.df_raw.dropna(subset=[self.source_col, self.target_col]).copy()
-            if self.weight_col is None:
-                df_working['weight'] = 1.0
-                actual_weight_col = 'weight'
-            else:
-                df_working.rename(columns={self.weight_col: 'weight'}, inplace=True)
-                actual_weight_col = 'weight'
-
-            try:
-                df_clean = prepare_data(
-                    data=df_working, 
-                    positions=tuple(self.selected_positions), 
-                    source=self.source_col, 
-                    target=self.target_col, 
-                    weight=actual_weight_col
-                )
-                df_agg = agg_weights(df_clean, positions=tuple(self.selected_positions))
-            except Exception as pipe_err:
-                raise RuntimeError(f"Error during CIGA data preparation:\n{str(pipe_err)}")
-            
-            tgraph = TGraph(
-                data=df_agg,
-                positions=self.selected_positions,
-                directed=True
-            )
-            self.finished.emit(tgraph, None)
-        except Exception as e:
-            self.finished.emit(None, str(e))
-
-class AnalysisWorker(QThread):
-    finished = Signal(object, object)  # df_final, error_message
-
-    def __init__(self, tgraph, acc, wtd, nrm, metrics_dict):
-        super().__init__()
-        self.tgraph = tgraph
-        self.acc = acc
-        self.wtd = wtd
-        self.nrm = nrm
-        self.metrics = metrics_dict
-
-    def run(self):
-        try:
-            pos_cols = list(self.tgraph._position)
-            node_cols = pos_cols + ['character']
-            df_node = None
-            df_graph = None
-
-            # 1. Centrality (Node-level)
-            if self.metrics.get('degree'):
-                res = tgraph_degree(self.tgraph, accumulate=self.acc, weighted=self.wtd, normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            if self.metrics.get('betweenness'):
-                inv_wt = "reciprocal" if self.wtd else False
-                res = tgraph_betweenness(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            if self.metrics.get('closeness'):
-                inv_wt = "reciprocal" if self.wtd else False
-                res = tgraph_closeness(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            if self.metrics.get('eigenvector'):
-                res = tgraph_eigenvector_centrality(self.tgraph, accumulate=self.acc, weighted=self.wtd, scale=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            # 2. Community (Node-level)
-            if self.metrics.get('leiden'):
-                res = tgraph_community_leiden(self.tgraph, accumulate=self.acc, w_normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            if self.metrics.get('multilevel'):
-                res = tgraph_community_multilevel(self.tgraph, accumulate=self.acc, w_normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            if self.metrics.get('label_propagation'):
-                res = tgraph_community_label_propagation(self.tgraph, accumulate=self.acc, w_normalized=self.nrm)
-                df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
-
-            # 3. Graph Properties (Graph-level)
-            if self.metrics.get('density'):
-                res = tgraph_density(self.tgraph, accumulate=self.acc)
-                df_graph = res if df_graph is None else pd.merge(df_graph, res, on=pos_cols, how='outer')
-
-            if self.metrics.get('transitivity'):
-                res = tgraph_transitivity_undirected(self.tgraph, accumulate=self.acc, w_normalized=self.nrm)
-                df_graph = res if df_graph is None else pd.merge(df_graph, res, on=pos_cols, how='outer')
-
-            if self.metrics.get('is_connected'):
-                res = tgraph_is_connected(self.tgraph, accumulate=self.acc)
-                df_graph = res if df_graph is None else pd.merge(df_graph, res, on=pos_cols, how='outer')
-
-            if self.metrics.get('diameter'):
-                res = tgraph_diameter(self.tgraph, accumulate=self.acc, w_normalized=self.nrm)
-                df_graph = res if df_graph is None else pd.merge(df_graph, res, on=pos_cols, how='outer')
-
-            if self.metrics.get('reciprocity'):
-                res = tgraph_reciprocity(self.tgraph, accumulate=self.acc)
-                df_graph = res if df_graph is None else pd.merge(df_graph, res, on=pos_cols, how='outer')
-
-            # Merge node and graph dataframes
-            if df_node is not None and df_graph is not None:
-                df_final = pd.merge(df_node, df_graph, on=pos_cols, how='left')
-            elif df_node is not None:
-                df_final = df_node
-            elif df_graph is not None:
-                df_final = df_graph
-            else:
-                df_final = None
-
-            self.finished.emit(df_final, None)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.finished.emit(None, str(e))
-
-class CustomWeightDialog(QDialog):
-    def __init__(self, parent=None, columns=None):
-        super().__init__(parent)
-        self.setWindowTitle("Custom Weight Function")
-        self.resize(500, 450)
-        
-        layout = QVBoxLayout(self)
-        
-        layout.addWidget(QLabel("Select Interaction Column:"))
-        self.cb_inter_col = QComboBox()
-        self.cb_inter_col.addItems(columns or [])
-        layout.addWidget(self.cb_inter_col)
-        
-        layout.addWidget(QLabel("Define Python function `custom_weight(interaction)`:"))
-        
-        self.code_editor = QPlainTextEdit()
-        # Default snippet
-        default_code = (
-            "def custom_weight(interaction):\n"
-            "    # Example: return the length of the string text\n"
-            "    if not isinstance(interaction, str):\n"
-            "        return 1.0\n"
-            "    return float(len(interaction))\n"
-        )
-        self.code_editor.setPlainText(default_code)
-        
-        # Use a fixed-width font
-        font = self.code_editor.font()
-        font.setFamily("Courier New")
-        self.code_editor.setFont(font)
-        
-        layout.addWidget(self.code_editor)
-        
-        btn_layout = QHBoxLayout()
-        self.btn_load_script = QPushButton("Load from .py File...")
-        self.btn_apply = QPushButton("Apply to Data")
-        
-        btn_layout.addWidget(self.btn_load_script)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.btn_apply)
-        
-        layout.addLayout(btn_layout)
-        
-        self.btn_load_script.clicked.connect(self.load_script)
-        self.btn_apply.clicked.connect(self.accept)
-        
-    def load_script(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Python Script", "",
-            "Python Files (*.py)"
-        )
-        if file_path:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                self.code_editor.setPlainText(f.read())
-                
-    def get_function_and_column(self):
-        code = self.code_editor.toPlainText()
-        col = self.cb_inter_col.currentText()
-        return code, col
+from .workers.network_worker import NetworkWorker
+from .workers.analysis_worker import AnalysisWorker
+from .dialogs.custom_weight_dialog import CustomWeightDialog
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -277,7 +88,7 @@ class MainWindow(QMainWindow):
             "<h3>CIGA: Character Interaction and Graph Analysis</h3>"
             "<p><b>CIGA GUI</b></p>"
             "<p><b>Version: 1.0.0</b></p>"
-            "<p>A powerful tool for visualizing and analyzing video character interactions.</p>"
+            "<p>A temporal graph based tool for visualizing and analyzing character interactions.</p>"
             "<p><i>Developed by: <a href='http://mediacomplab.com'>Media Comprehension Lab</a></i></p>"
             "<p>For more information, visit our <a href='https://github.com/MediaComprehensionLab/CIGA'>GitHub Repository</a>.</p>"
             "<p>If you find CIGA useful, please consider citing our work:"
@@ -713,15 +524,22 @@ class MainWindow(QMainWindow):
         self.btn_run_analysis.setEnabled(False)
         
         # Show progress dialog
-        self.analysis_prog = QProgressDialog("Calculating Metrics...", None, 0, 0, self)
-        self.analysis_prog.setWindowTitle("Please Wait")
+        self.analysis_prog = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+        self.analysis_prog.setWindowTitle("Calculating Metrics")
         self.analysis_prog.setWindowModality(Qt.WindowModality.WindowModal)
         self.analysis_prog.setMinimumDuration(0)
+        # We don't want them to cancel easily because it runs in C/C++ backend sometimes, but we can try
         self.analysis_prog.show()
 
         self.analysis_worker = AnalysisWorker(self.tgraph, acc, wtd, nrm, metrics_dict)
+        self.analysis_worker.progress.connect(self._update_analysis_progress)
         self.analysis_worker.finished.connect(self._on_analysis_finished)
         self.analysis_worker.start()
+
+    def _update_analysis_progress(self, val, msg):
+        if hasattr(self, 'analysis_prog'):
+            self.analysis_prog.setLabelText(msg)
+            self.analysis_prog.setValue(val)
 
     def _on_analysis_finished(self, df_final, error_msg):
         self.btn_run_analysis.setEnabled(True)
