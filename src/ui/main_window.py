@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                                QPushButton, QLabel, QComboBox, QCheckBox,
                                QGroupBox, QTabWidget, QTableWidget, QTableWidgetItem,
-                               QFileDialog, QListWidget, QAbstractItemView, QMessageBox, QApplication, QProgressDialog)
+                               QFileDialog, QListWidget, QAbstractItemView, QMessageBox, QApplication, QProgressDialog, QDialog, QPlainTextEdit)
 from PySide6.QtGui import QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QUrl, QThread, Signal
@@ -148,6 +148,66 @@ class AnalysisWorker(QThread):
             traceback.print_exc()
             self.finished.emit(None, str(e))
 
+class CustomWeightDialog(QDialog):
+    def __init__(self, parent=None, columns=None):
+        super().__init__(parent)
+        self.setWindowTitle("Custom Weight Function")
+        self.resize(500, 450)
+        
+        layout = QVBoxLayout(self)
+        
+        layout.addWidget(QLabel("Select Interaction Column:"))
+        self.cb_inter_col = QComboBox()
+        self.cb_inter_col.addItems(columns or [])
+        layout.addWidget(self.cb_inter_col)
+        
+        layout.addWidget(QLabel("Define Python function `custom_weight(interaction)`:"))
+        
+        self.code_editor = QPlainTextEdit()
+        # Default snippet
+        default_code = (
+            "def custom_weight(interaction):\n"
+            "    # Example: return the length of the string text\n"
+            "    if not isinstance(interaction, str):\n"
+            "        return 1.0\n"
+            "    return float(len(interaction))\n"
+        )
+        self.code_editor.setPlainText(default_code)
+        
+        # Use a fixed-width font
+        font = self.code_editor.font()
+        font.setFamily("Courier New")
+        self.code_editor.setFont(font)
+        
+        layout.addWidget(self.code_editor)
+        
+        btn_layout = QHBoxLayout()
+        self.btn_load_script = QPushButton("Load from .py File...")
+        self.btn_apply = QPushButton("Apply to Data")
+        
+        btn_layout.addWidget(self.btn_load_script)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_apply)
+        
+        layout.addLayout(btn_layout)
+        
+        self.btn_load_script.clicked.connect(self.load_script)
+        self.btn_apply.clicked.connect(self.accept)
+        
+    def load_script(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Python Script", "",
+            "Python Files (*.py)"
+        )
+        if file_path:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                self.code_editor.setPlainText(f.read())
+                
+    def get_function_and_column(self):
+        code = self.code_editor.toPlainText()
+        col = self.cb_inter_col.currentText()
+        return code, col
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -215,8 +275,9 @@ class MainWindow(QMainWindow):
         msg.setTextFormat(Qt.RichText)
         msg.setText(
             "<h3>CIGA: Character Interaction and Graph Analysis</h3>"
-            "<p><b>Video Annotator</b></p>"
-            "<p>A powerful tool for annotating video character interactions.</p>"
+            "<p><b>CIGA GUI</b></p>"
+            "<p><b>Version: 1.0.0</b></p>"
+            "<p>A powerful tool for visualizing and analyzing video character interactions.</p>"
             "<p><i>Developed by: <a href='http://mediacomplab.com'>Media Comprehension Lab</a></i></p>"
             "<p>For more information, visit our <a href='https://github.com/MediaComprehensionLab/CIGA'>GitHub Repository</a>.</p>"
             "<p>If you find CIGA useful, please consider citing our work:"
@@ -270,6 +331,11 @@ class MainWindow(QMainWindow):
         net_layout.addWidget(QLabel("Edge Weight Column (Optional):"))
         net_layout.addWidget(self.cb_weight)
         
+        self.btn_custom_weight = QPushButton("Compute Custom Weights...")
+        self.btn_custom_weight.setToolTip("Define a custom Python function to compute weights based on an interaction column.")
+        self.btn_custom_weight.setEnabled(False)
+        net_layout.addWidget(self.btn_custom_weight)
+
         self.btn_build_graph = QPushButton("Build Network")
         self.btn_build_graph.setEnabled(False)
         net_layout.addWidget(self.btn_build_graph)
@@ -359,6 +425,7 @@ class MainWindow(QMainWindow):
         # Connect button signals (mock functionality for demo)
         self.btn_load_csv.clicked.connect(self.load_file)
         self.btn_build_graph.clicked.connect(self.build_network)
+        self.btn_custom_weight.clicked.connect(self.open_custom_weight_dialog)
         self.btn_run_analysis.clicked.connect(self.run_analysis)
 
     def _setup_right_panel(self):
@@ -482,13 +549,76 @@ class MainWindow(QMainWindow):
 
                 self.btn_build_graph.setEnabled(True)
                 self.btn_run_analysis.setEnabled(True)
+                self.btn_custom_weight.setEnabled(True)
                 
                 # Switch focus to the Raw Data Tab
                 self.tabs.setCurrentWidget(self.tab_raw_data)
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error Loading File", f"Could not read file:\n{str(e)}")
+
+    def open_custom_weight_dialog(self):
+        if not hasattr(self, 'df_raw') or self.df_raw is None:
+            return
+            
+        columns = self.df_raw.columns.tolist()
+        dialog = CustomWeightDialog(self, columns)
+        
+        # Pre-select 'interaction' if it exists
+        lower_cols = [c.lower() for c in columns]
+        if 'interaction' in lower_cols:
+            dialog.cb_inter_col.setCurrentIndex(lower_cols.index('interaction'))
+            
+        if dialog.exec() == QDialog.Accepted:
+            code, col_name = dialog.get_function_and_column()
+            
+            local_env = {}
+            try:
+                exec(code, {}, local_env)
+                if 'custom_weight' not in local_env:
+                    QMessageBox.warning(self, "Error", "The code must define a function named 'custom_weight'.")
+                    return
+                    
+                func = local_env['custom_weight']
                 
+                # Apply function
+                temp_col = self.df_raw[col_name]
+                self.df_raw['weight'] = temp_col.apply(func)
+                
+                # Refresh columns in UI and select the new column
+                self._refresh_columns_after_custom_weight('weight')
+                self.load_dataframe_to_table(self.df_raw, self.table_raw_data)
+                
+                QMessageBox.information(self, "Success", f"Computed weights added as 'weight' column and selected.")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Execution Error", f"Failed to compute weights:\n{str(e)}")
+
+    def _refresh_columns_after_custom_weight(self, new_col):
+        columns = self.df_raw.columns.tolist()
+        for cb in [self.cb_source, self.cb_target, self.cb_weight]:
+            curr = cb.currentText()
+            if cb == self.cb_weight:
+                cb.clear()
+                cb.addItem("-- Default (Count occurrences) --")
+                cb.addItems(columns)
+                if new_col in columns:
+                    cb.setCurrentText(new_col)
+                else:
+                    cb.setCurrentText(curr)
+            else:
+                cb.clear()
+                cb.addItem("-- Select Column --")
+                cb.addItems(columns)
+                cb.setCurrentText(curr)
+                
+        selected = [item.text() for item in self.list_position.selectedItems()]
+        self.list_position.clear()
+        self.list_position.addItems(columns)
+        for i in range(self.list_position.count()):
+            if self.list_position.item(i).text() in selected:
+                self.list_position.item(i).setSelected(True)
+
     def build_network(self):
         """Construct the TGraph using the user's column selections."""
         if not hasattr(self, 'df_raw') or self.df_raw is None:
