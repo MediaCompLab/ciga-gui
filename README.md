@@ -2,7 +2,7 @@
 
 **CIGA GUI** is a desktop application with a graphical interface designed for visualizing and analyzing Character Interaction Graphs. Provide your CSV annotation data to generate interactive network graphs and calculate various social network metrics like Centrality and Community detection.
 
-*This tool is part of the [CIGA (Character Interaction Graph Analysis)](https://github.com/MediaCompLab/ciga.git) project suite. It is recommended to use the [CIGA Annotator](https://github.com/MediaCompLab/ciga-annotator/README.md) to generate compatible CSV data formats.*
+*This tool is part of the [CIGA (Character Interaction Graph Analysis)](https://github.com/MediaCompLab/ciga) project suite. It is recommended to use the [CIGA Annotator](https://github.com/MediaCompLab/ciga-annotator) to generate compatible CSV data formats.*
 
 ## Features
 - Load structured interaction data exported from CIGA Annotator.
