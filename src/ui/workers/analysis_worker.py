@@ -1,7 +1,7 @@
 from PySide6.QtCore import QThread, Signal
 import pandas as pd
 
-from ciga.analysis import tgraph_degree, tgraph_betweenness, tgraph_closeness, tgraph_eigenvector_centrality
+from ciga.analysis import tgraph_degree_centrality, tgraph_betweenness_centrality, tgraph_closeness_centrality, tgraph_eigenvector_centrality
 from ciga.analysis.tgraph_community_analysis import tgraph_community_leiden, tgraph_community_multilevel, tgraph_community_label_propagation
 from ciga.analysis.tgraph_properties import tgraph_density, tgraph_transitivity_undirected, tgraph_is_connected, tgraph_diameter, tgraph_reciprocity
 
@@ -42,21 +42,21 @@ class AnalysisWorker(QThread):
             # 1. Centrality (Node-level)
             if self.metrics.get('degree'):
                 self.progress.emit(int((current_step / total_metrics) * 100), "Calculating Degree Centrality...")
-                res = tgraph_degree(self.tgraph, accumulate=self.acc, weighted=self.wtd, normalized=self.nrm)
+                res = tgraph_degree_centrality(self.tgraph, accumulate=self.acc, weighted=self.wtd, normalized=self.nrm)
                 df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
                 update_progress("Degree Centrality")
 
             if self.metrics.get('betweenness'):
                 self.progress.emit(int((current_step / total_metrics) * 100), "Calculating Betweenness Centrality (This can take a while)...")
                 inv_wt = "reciprocal" if self.wtd else False
-                res = tgraph_betweenness(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
+                res = tgraph_betweenness_centrality(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
                 df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
                 update_progress("Betweenness Centrality")
 
             if self.metrics.get('closeness'):
                 self.progress.emit(int((current_step / total_metrics) * 100), "Calculating Closeness Centrality...")
                 inv_wt = "reciprocal" if self.wtd else False
-                res = tgraph_closeness(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
+                res = tgraph_closeness_centrality(self.tgraph, accumulate=self.acc, weighted=self.wtd, invert_weight=inv_wt, normalized=self.nrm)
                 df_node = res if df_node is None else pd.merge(df_node, res, on=node_cols, how='outer')
                 update_progress("Closeness Centrality")
 

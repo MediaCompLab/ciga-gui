@@ -10,20 +10,50 @@
 - Integrated core social network algorithms (Degree Centrality, Betweenness, Closeness, Modularity, etc.).
 - Easily export analyzed metrics results and visualizations.
 
+
 **Screen shot**
 ![screenshot1](./screenshot1.png)
 ![screenshot2](./screenshot2.png)
 ![screenshot3](./screenshot3.png)
 
-## Installation & Run
+## Installation & Usage (Two Options)
 
-1. **Install Dependencies**  
-   We recommend running this in a Python virtual environment:
+### Option 1: Portable Release (For Standard Users)
+If you don't want to configure Python environments, simply download the pre-packaged release:
+1. Go to the **Releases** page of this repository.
+2. Download the `CIGA-GUI-Windows-Portable.zip` file.
+3. Extract the ZIP file anywhere on your computer.
+4. Double-click `CIGA-GUI.exe` inside the extracted folder to run the application immediately. No installation or Python environment is required!
+
+### Option 2: Run from Source (For Developers & Researchers)
+If you already have Python installed and prefer running from the source code:
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/MediaCompLab/ciga-gui.git
+   cd ciga-gui
+   ```
+
+2. **Install Dependencies:**
+   We recommend using a Python virtual environment or Conda environment:
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Run the Application**  
+3. **Run the Application:**
    ```bash
    python src/main.py
    ```
+
+## Build Windows App (For Developers)
+
+To build the distributable Windows portable package, run:
+
+```bash
+python build.py
+```
+
+After the build completes, a directory will be generated at `dist/CIGA-GUI`.
+You can ZIP this entire directory and distribute it to users. 
+
+*Note: The build uses PyInstaller in directory mode (`--onedir`). We intentionally avoid `--onefile` mode because compressing heavy ML libraries (like PyTorch) into a single executable results in extremely slow startup times for end-users. The distributed directory ensures the application launches instantly.*
