@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                                QPushButton, QLabel, QComboBox, QCheckBox,
                                QGroupBox, QTabWidget, QTableWidget, QTableWidgetItem,
-                               QFileDialog, QListWidget, QAbstractItemView, QMessageBox, QApplication, QProgressDialog, QDialog, QPlainTextEdit)
+                               QFileDialog, QListWidget, QAbstractItemView, QMessageBox, QApplication, QProgressDialog, QDialog, QPlainTextEdit,
+                               QLineEdit, QSpinBox, QDoubleSpinBox, QScrollArea)
 from PySide6.QtGui import QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QUrl
@@ -15,7 +16,7 @@ import threading
 import ciga
 from ciga import TGraph
 
-from .workers.network_worker import NetworkWorker
+from .workers.graph_worker import GraphWorker
 from .workers.analysis_worker import AnalysisWorker
 from .dialogs.custom_weight_dialog import CustomWeightDialog
 
@@ -36,9 +37,13 @@ class MainWindow(QMainWindow):
         # Left Panel (Controls)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_panel.setFixedWidth(280)
+        left_panel.setMinimumWidth(280)
 
         self._setup_left_panel(left_layout)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFixedWidth(310)
+        left_scroll.setWidget(left_panel)
 
         # Right Panel (Tabs)
         self.tabs = QTabWidget()
@@ -54,7 +59,7 @@ class MainWindow(QMainWindow):
         self._setup_right_panel()
 
         # Add panels to main layout
-        main_layout.addWidget(left_panel)
+        main_layout.addWidget(left_scroll)
         main_layout.addWidget(self.tabs)
 
     def _create_menu_bar(self):
@@ -109,17 +114,23 @@ class MainWindow(QMainWindow):
         data_layout.addWidget(self.lbl_file_path)
         data_group.setLayout(data_layout)
 
-        # 2. Network Config Group
-        net_group = QGroupBox("2. Network Configuration")
-        net_layout = QVBoxLayout()
+        # 2. Graph Config Group
+        graph_group = QGroupBox("2. Graph Configuration")
+        graph_layout = QVBoxLayout()
         self.cb_source = QComboBox()
         self.cb_target = QComboBox()
+        self.cb_graph_type = QComboBox()
+        self.cb_graph_type.addItems(["Directed", "Undirected"])
+        self.cb_graph_type.setToolTip("Choose whether source-target direction should be preserved.")
         
         # Make position a multi-select list widget to support MultiIndex
         self.list_position = QListWidget()
         self.list_position.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         self.list_position.setFixedHeight(60)
         self.list_position.setToolTip("Hold Ctrl/Cmd to select multiple columns for hierarchical position (MultiIndex).")
+        self.chk_auto_position = QCheckBox("Auto position if missing")
+        self.chk_auto_position.setChecked(True)
+        self.chk_auto_position.setToolTip("When no position column is selected, create a numeric position column from row order.")
         
         # Add Weight column selection
         self.cb_weight = QComboBox()
@@ -131,36 +142,39 @@ class MainWindow(QMainWindow):
             
         self.cb_weight.setItemText(0, "-- Default (Count occurrences) --")
 
-        net_layout.addWidget(QLabel("Source (e.g. Speaker):"))
-        net_layout.addWidget(self.cb_source)
-        net_layout.addWidget(QLabel("Target (e.g. Listener):"))
-        net_layout.addWidget(self.cb_target)
-        net_layout.addWidget(QLabel("Position(s) (e.g. Scene/Time):"))
-        net_layout.addWidget(self.list_position)
+        graph_layout.addWidget(QLabel("Source (e.g. Speaker):"))
+        graph_layout.addWidget(self.cb_source)
+        graph_layout.addWidget(QLabel("Target (e.g. Listener):"))
+        graph_layout.addWidget(self.cb_target)
+        graph_layout.addWidget(QLabel("Graph Type:"))
+        graph_layout.addWidget(self.cb_graph_type)
+        graph_layout.addWidget(QLabel("Position(s) (e.g. Scene/Time):"))
+        graph_layout.addWidget(self.list_position)
+        graph_layout.addWidget(self.chk_auto_position)
         
         # Add a visual separator or grouping for edge weighting
-        net_layout.addWidget(QLabel("Edge Weight Column (Optional):"))
-        net_layout.addWidget(self.cb_weight)
+        graph_layout.addWidget(QLabel("Edge Weight Column (Optional):"))
+        graph_layout.addWidget(self.cb_weight)
         
         self.btn_custom_weight = QPushButton("Compute Custom Weights...")
         self.btn_custom_weight.setToolTip("Define a custom Python function to compute weights based on an interaction column.")
         self.btn_custom_weight.setEnabled(False)
-        net_layout.addWidget(self.btn_custom_weight)
+        graph_layout.addWidget(self.btn_custom_weight)
 
-        self.btn_build_graph = QPushButton("Build Network")
+        self.btn_build_graph = QPushButton("Build TGraph")
         self.btn_build_graph.setEnabled(False)
-        net_layout.addWidget(self.btn_build_graph)
-        net_group.setLayout(net_layout)
+        graph_layout.addWidget(self.btn_build_graph)
+        graph_group.setLayout(graph_layout)
 
         # 3. Analysis Group
         analysis_group = QGroupBox("3. Calculate Metrics")
         analysis_layout = QVBoxLayout()
         
-        # Network Status Label
-        self.lbl_network_status = QLabel("Network not built yet.")
-        self.lbl_network_status.setStyleSheet("color: blue; font-weight: bold;")
-        self.lbl_network_status.setWordWrap(True)
-        analysis_layout.addWidget(self.lbl_network_status)
+        # TGraph Status Label
+        self.lbl_graph_status = QLabel("TGraph not built yet.")
+        self.lbl_graph_status.setStyleSheet("color: blue; font-weight: bold;")
+        self.lbl_graph_status.setWordWrap(True)
+        analysis_layout.addWidget(self.lbl_graph_status)
         
         self.chk_accumulate = QCheckBox("Accumulate dynamically")
         self.chk_accumulate.setChecked(True)
@@ -169,8 +183,82 @@ class MainWindow(QMainWindow):
         self.chk_weighted = QCheckBox("Use Weights")
         self.chk_weighted.setChecked(True)
 
-        self.chk_normalized = QCheckBox("Normalize metrics")
+        self.chk_normalized = QCheckBox("Normalize metric scores")
         self.chk_normalized.setChecked(True)
+
+        # Temporal scope controls
+        scope_box = QGroupBox("Temporal Scope")
+        scope_layout = QVBoxLayout(scope_box)
+
+        self.spin_window_size = QSpinBox()
+        self.spin_window_size.setRange(0, 1000000)
+        self.spin_window_size.setSpecialValueText("Off")
+        self.spin_window_size.setToolTip("If set, each metric uses only the most recent N time steps. Overrides Accumulate dynamically.")
+
+        self.spin_stride = QSpinBox()
+        self.spin_stride.setRange(1, 1000000)
+        self.spin_stride.setValue(1)
+        self.spin_stride.setToolTip("Analyze every Nth time step.")
+
+        window_stride_layout = QHBoxLayout()
+        window_stride_layout.addWidget(QLabel("Window:"))
+        window_stride_layout.addWidget(self.spin_window_size)
+        window_stride_layout.addWidget(QLabel("Stride:"))
+        window_stride_layout.addWidget(self.spin_stride)
+        scope_layout.addLayout(window_stride_layout)
+
+        self.edit_start_bound = QLineEdit()
+        self.edit_start_bound.setPlaceholderText("Start, e.g. 1 or 1,1,1")
+        self.edit_start_bound.setToolTip("Optional inclusive start position. Use comma-separated values for multi-level positions.")
+        self.edit_end_bound = QLineEdit()
+        self.edit_end_bound.setPlaceholderText("End, e.g. 10 or 1,2,5")
+        self.edit_end_bound.setToolTip("Optional inclusive end position. Use comma-separated values for multi-level positions.")
+        scope_layout.addWidget(self.edit_start_bound)
+        scope_layout.addWidget(self.edit_end_bound)
+
+        # Weight handling controls
+        weight_box = QGroupBox("Weight Handling")
+        weight_layout = QVBoxLayout(weight_box)
+
+        self.chk_graph_weight_normalized = QCheckBox("Normalize graph weights")
+        self.chk_graph_weight_normalized.setToolTip("Normalize edge weights before metric calculation. This is separate from metric-score normalization.")
+
+        self.cb_invert_weight = QComboBox()
+        self.cb_invert_weight.addItem("Auto invert path weights", "auto")
+        self.cb_invert_weight.addItem("Do not invert weights", "none")
+        self.cb_invert_weight.addItem("Reciprocal inversion", "reciprocal")
+        self.cb_invert_weight.addItem("Max-minus inversion", "max_minus")
+        self.cb_invert_weight.setToolTip("For weighted betweenness, closeness, and harmonic centrality, igraph treats weights as distance/cost.")
+
+        self.chk_mean_weight = QCheckBox("Average accumulated/window weights")
+        self.chk_mean_weight.setToolTip("Divide accumulated or windowed edge weights by the number of time steps represented.")
+
+        self.chk_decay_weights = QCheckBox("Apply decay accumulation")
+        self.chk_decay_weights.setToolTip("Precompute decayed cumulative weights before metric calculation. This is the forgetting simulation mode.")
+
+        self.spin_decay_rate = QDoubleSpinBox()
+        self.spin_decay_rate.setRange(0.0, 0.99)
+        self.spin_decay_rate.setSingleStep(0.05)
+        self.spin_decay_rate.setDecimals(2)
+        self.spin_decay_rate.setValue(0.10)
+        self.spin_decay_rate.setToolTip("Decay rate. For exponential decay, values must be in [0, 1).")
+
+        self.cb_decay_mode = QComboBox()
+        self.cb_decay_mode.addItem("Exponential decay", "exponential")
+        self.cb_decay_mode.addItem("Power-law decay", "power_law")
+        self.cb_decay_mode.addItem("Linear decay", "linear")
+
+        weight_layout.addWidget(self.chk_graph_weight_normalized)
+        weight_layout.addWidget(QLabel("Path weight mode:"))
+        weight_layout.addWidget(self.cb_invert_weight)
+        weight_layout.addWidget(self.chk_mean_weight)
+        weight_layout.addWidget(self.chk_decay_weights)
+
+        decay_layout = QHBoxLayout()
+        decay_layout.addWidget(QLabel("Decay:"))
+        decay_layout.addWidget(self.spin_decay_rate)
+        weight_layout.addLayout(decay_layout)
+        weight_layout.addWidget(self.cb_decay_mode)
         
         # Metrics setup
         self.metrics_tabs = QTabWidget()
@@ -182,8 +270,9 @@ class MainWindow(QMainWindow):
         self.chk_degree.setChecked(True)
         self.chk_betweenness = QCheckBox("Betweenness Centrality")
         self.chk_closeness = QCheckBox("Closeness Centrality")
+        self.chk_harmonic = QCheckBox("Harmonic Centrality")
         self.chk_eigenvector = QCheckBox("Eigenvector Centrality")
-        for cb in [self.chk_degree, self.chk_betweenness, self.chk_closeness, self.chk_eigenvector]:
+        for cb in [self.chk_degree, self.chk_betweenness, self.chk_closeness, self.chk_harmonic, self.chk_eigenvector]:
             cent_layout.addWidget(cb)
         cent_layout.addStretch()
         self.metrics_tabs.addTab(cent_widget, "Centrality")
@@ -223,19 +312,21 @@ class MainWindow(QMainWindow):
         analysis_layout.addWidget(self.chk_accumulate)
         analysis_layout.addWidget(self.chk_weighted)
         analysis_layout.addWidget(self.chk_normalized)
+        analysis_layout.addWidget(scope_box)
+        analysis_layout.addWidget(weight_box)
         analysis_layout.addWidget(metrics_box)
         analysis_layout.addWidget(self.btn_run_analysis)
         analysis_group.setLayout(analysis_layout)
 
         # Add groups to left panel layout
         layout.addWidget(data_group)
-        layout.addWidget(net_group)
+        layout.addWidget(graph_group)
         layout.addWidget(analysis_group)
         layout.addStretch() # Push everything to the top
 
         # Connect button signals (mock functionality for demo)
         self.btn_load_csv.clicked.connect(self.load_file)
-        self.btn_build_graph.clicked.connect(self.build_network)
+        self.btn_build_graph.clicked.connect(self.build_tgraph)
         self.btn_custom_weight.clicked.connect(self.open_custom_weight_dialog)
         self.btn_run_analysis.clicked.connect(self.run_analysis)
 
@@ -325,6 +416,7 @@ class MainWindow(QMainWindow):
                     self.df_raw = pd.read_csv(file_path)
                 else:
                     self.df_raw = pd.read_excel(file_path)
+                self.df_raw.columns = [str(col) for col in self.df_raw.columns]
                 
                 # 2. Display Data in QTableWidget
                 self.load_dataframe_to_table(self.df_raw, self.table_raw_data)
@@ -353,9 +445,9 @@ class MainWindow(QMainWindow):
                 if 'listener' in lower_cols:
                     self.cb_target.setCurrentIndex(lower_cols.index('listener') + 1)
                     
-                # For position, let's try to find 'scene' or 'time'
+                # For position, try common temporal/order columns first.
                 for i, col in enumerate(lower_cols):
-                    if 'scene' in col or 'time' in col:
+                    if 'scene' in col or 'time' in col or 'position' in col:
                         self.list_position.item(i).setSelected(True)
 
                 self.btn_build_graph.setEnabled(True)
@@ -430,13 +522,35 @@ class MainWindow(QMainWindow):
             if self.list_position.item(i).text() in selected:
                 self.list_position.item(i).setSelected(True)
 
-    def build_network(self):
+    def _ensure_auto_position_column(self):
+        """Create and select a numeric row-order position column when none is provided."""
+        columns = self.df_raw.columns.tolist()
+        base_name = "position"
+        position_col = base_name
+        if position_col in columns:
+            suffix = 1
+            while f"__ciga_position_{suffix}" in columns:
+                suffix += 1
+            position_col = f"__ciga_position_{suffix}"
+
+        self.df_raw[position_col] = range(1, len(self.df_raw) + 1)
+
+        for cb in [self.cb_source, self.cb_target, self.cb_weight]:
+            cb.addItem(position_col)
+
+        self.list_position.addItem(position_col)
+        self.list_position.item(self.list_position.count() - 1).setSelected(True)
+        self.load_dataframe_to_table(self.df_raw, self.table_raw_data)
+        return position_col
+
+    def build_tgraph(self):
         """Construct the TGraph using the user's column selections."""
         if not hasattr(self, 'df_raw') or self.df_raw is None:
             return
             
         source_col = self.cb_source.currentText()
         target_col = self.cb_target.currentText()
+        directed = self.cb_graph_type.currentText() == "Directed"
         
         selected_positions = [item.text() for item in self.list_position.selectedItems()]
         
@@ -447,63 +561,146 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing Columns", "Please select valid Source and Target columns.")
             return
             
+        if len(selected_positions) == 0 and self.chk_auto_position.isChecked():
+            selected_positions = [self._ensure_auto_position_column()]
+
         if len(selected_positions) == 0:
             QMessageBox.warning(self, "Missing Position", "Please select at least one Position column (e.g. Scene/Time).")
             return
 
         self.btn_build_graph.setEnabled(False)
-        self.lbl_network_status.setText("Building network... please wait.")
-        self.lbl_network_status.setStyleSheet("color: orange;")
+        self.lbl_graph_status.setText("Building TGraph... please wait.")
+        self.lbl_graph_status.setStyleSheet("color: orange;")
         
         # Show progress dialog
-        self.net_prog = QProgressDialog("Building Network...", None, 0, 0, self)
-        self.net_prog.setWindowTitle("Please Wait")
-        self.net_prog.setWindowModality(Qt.WindowModality.WindowModal)
-        self.net_prog.setMinimumDuration(0)
-        self.net_prog.show()
+        self.tgraph_prog = QProgressDialog("Building TGraph...", None, 0, 0, self)
+        self.tgraph_prog.setWindowTitle("Please Wait")
+        self.tgraph_prog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.tgraph_prog.setMinimumDuration(0)
+        self.tgraph_prog.show()
 
         # Start background worker
-        self.net_worker = NetworkWorker(self.df_raw, source_col, target_col, selected_positions, weight_col)
-        self.net_worker.finished.connect(self._on_network_built)
-        self.net_worker.start()
+        self.tgraph_worker = GraphWorker(self.df_raw, source_col, target_col, selected_positions, weight_col, directed)
+        self.tgraph_worker.finished.connect(self._on_tgraph_built)
+        self.tgraph_worker.start()
 
-    def _on_network_built(self, tgraph, error_msg):
+    def _on_tgraph_built(self, tgraph, error_msg):
         self.btn_build_graph.setEnabled(True)
-        if hasattr(self, 'net_prog'):
-            self.net_prog.close()
+        if hasattr(self, 'tgraph_prog'):
+            self.tgraph_prog.close()
 
         if error_msg:
-            self.lbl_network_status.setText("Failed to build network.")
-            self.lbl_network_status.setStyleSheet("color: red;")
-            QMessageBox.critical(self, "Error Building TGraph", f"An error occurred while building the network:\n{error_msg}\n\nPlease ensure your columns match requirements.")
+            self.lbl_graph_status.setText("Failed to build TGraph.")
+            self.lbl_graph_status.setStyleSheet("color: red;")
+            QMessageBox.critical(self, "Error Building TGraph", f"An error occurred while building the TGraph:\n{error_msg}\n\nPlease ensure your columns match requirements.")
             return
 
         self.tgraph = tgraph
         num_time_steps = len(self.tgraph.data.index.unique())
         total_edges = len(self.tgraph.data)
         
-        success_msg = f"Network built successfully!\n• {num_time_steps} Time Step(s)\n• {total_edges} Distinct Edge(s)"
-        self.lbl_network_status.setText(success_msg)
-        self.lbl_network_status.setStyleSheet("color: green;")
+        graph_type = "Directed" if self.tgraph.is_directed else "Undirected"
+        success_msg = f"TGraph built successfully!\n• {graph_type}\n• {num_time_steps} Time Step(s)\n• {total_edges} Distinct Edge(s)"
+        self.lbl_graph_status.setText(success_msg)
+        self.lbl_graph_status.setStyleSheet("color: green;")
         
         self.btn_run_analysis.setEnabled(True)
         self.btn_gen_viz.setEnabled(True)
         self.tabs.setCurrentWidget(self.tab_analysis)
 
+    def _parse_position_bound(self, text, label):
+        """Parse a user-entered position bound into a numeric tuple."""
+        text = text.strip()
+        if not text:
+            return None
+
+        parts = [part.strip() for part in text.replace(";", ",").split(",") if part.strip()]
+        if len(parts) > len(self.tgraph._position):
+            raise ValueError(f"{label} has {len(parts)} values, but the TGraph uses {len(self.tgraph._position)} position column(s).")
+
+        values = []
+        for part in parts:
+            try:
+                if any(ch in part.lower() for ch in [".", "e"]):
+                    value = float(part)
+                    if value.is_integer():
+                        value = int(value)
+                else:
+                    value = int(part)
+            except ValueError as exc:
+                raise ValueError(f"{label} must be numeric. Could not parse '{part}'.") from exc
+            values.append(value)
+
+        return tuple(values)
+
     def run_analysis(self):
         """Run selected metrics and merge them into a result DataFrame."""
         if not hasattr(self, 'tgraph') or self.tgraph is None:
-            QMessageBox.warning(self, "No Network", "Please build the network first.")
+            QMessageBox.warning(self, "No TGraph", "Please build the TGraph first.")
             return
 
-        acc = self.chk_accumulate.isChecked()
-        wtd = self.chk_weighted.isChecked()
-        nrm = self.chk_normalized.isChecked()
+        accumulate = self.chk_accumulate.isChecked()
+        weighted = self.chk_weighted.isChecked()
+        normalized = self.chk_normalized.isChecked()
+
+        try:
+            start_bound = self._parse_position_bound(self.edit_start_bound.text(), "Start")
+            end_bound = self._parse_position_bound(self.edit_end_bound.text(), "End")
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Temporal Scope", str(e))
+            return
+
+        window_size = self.spin_window_size.value() or None
+        if window_size is not None:
+            accumulate = False
+
+        stride = self.spin_stride.value()
+        mean_weight = self.chk_mean_weight.isChecked()
+        decay_enabled = self.chk_decay_weights.isChecked()
+        if decay_enabled and window_size is not None:
+            QMessageBox.warning(
+                self,
+                "Invalid Temporal Scope",
+                "Decay accumulation already defines a memory window. Turn Window off before using decay accumulation."
+            )
+            return
+
+        if decay_enabled and mean_weight:
+            QMessageBox.warning(
+                self,
+                "Invalid Weight Handling",
+                "Decay accumulation cannot be combined with Average accumulated/window weights."
+            )
+            return
+
+        if mean_weight and not accumulate and window_size is None:
+            QMessageBox.warning(
+                self,
+                "Invalid Weight Handling",
+                "Average accumulated/window weights requires Accumulate dynamically or a Window size."
+            )
+            return
+
+        analysis_options = {
+            'start': start_bound,
+            'end': end_bound,
+            'window_size': window_size,
+            'stride': stride,
+            'w_normalized': self.chk_graph_weight_normalized.isChecked(),
+            'invert_weight': self.cb_invert_weight.currentData(),
+            'mean_weight': mean_weight,
+            'decay_enabled': decay_enabled,
+            'decay_rate': self.spin_decay_rate.value(),
+            'decay_mode': self.cb_decay_mode.currentData(),
+        }
+        if decay_enabled:
+            accumulate = False
         
         metrics_dict = {
             'degree': self.chk_degree.isChecked(),
             'betweenness': self.chk_betweenness.isChecked(),
             'closeness': self.chk_closeness.isChecked(),
+            'harmonic': self.chk_harmonic.isChecked(),
             'eigenvector': self.chk_eigenvector.isChecked(),
             'leiden': self.chk_leiden.isChecked(),
             'multilevel': self.chk_multilevel.isChecked(),
@@ -531,7 +728,7 @@ class MainWindow(QMainWindow):
         # We don't want them to cancel easily because it runs in C/C++ backend sometimes, but we can try
         self.analysis_prog.show()
 
-        self.analysis_worker = AnalysisWorker(self.tgraph, acc, wtd, nrm, metrics_dict)
+        self.analysis_worker = AnalysisWorker(self.tgraph, accumulate, weighted, normalized, metrics_dict, analysis_options)
         self.analysis_worker.progress.connect(self._update_analysis_progress)
         self.analysis_worker.finished.connect(self._on_analysis_finished)
         self.analysis_worker.start()
@@ -598,7 +795,7 @@ class MainWindow(QMainWindow):
     def generate_visualization(self):
         """Generate interactive temporal graph HTML utilizing CIGA's visualization server and load it into QWebEngineView."""
         if not hasattr(self, 'tgraph') or self.tgraph is None:
-            QMessageBox.warning(self, "No Network", "Please build the network first.")
+            QMessageBox.warning(self, "No TGraph", "Please build the TGraph first.")
             return
 
         try:
