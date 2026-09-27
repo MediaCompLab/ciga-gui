@@ -35,21 +35,34 @@ If you already have Python installed and prefer running from the source code:
    ```
 
 2. **Install Dependencies:**
-   We recommend using a Python virtual environment or Conda environment:
+   We recommend using a Python virtual environment or Conda environment. This installs PySide6, pandas and the `ciga` library (0.1.5 or newer) from PyPI:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the Application:**
+3. **Run the Application** (from the repository root):
    ```bash
-   python src/main.py
+   python run.py
    ```
+
+## Development
+
+Install the test and build tools, then run the headless worker tests:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests exercise the graph and analysis workers against the installed `ciga`, so they catch
+changes in the library API that would otherwise surface only as an error dialog in the app.
 
 ## Build Windows App (For Developers)
 
 To build the distributable Windows portable package, run:
 
 ```bash
+pip install -r requirements-dev.txt
 python build.py
 ```
 

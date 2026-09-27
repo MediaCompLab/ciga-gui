@@ -5,6 +5,7 @@
 *.srt
 *.csv
 *.txt
+!requirements*.txt
 *.vat
 *.exe
 
@@ -39,3 +40,4 @@ Thumbs.db
 *.backup
 *.spec
 __pycache__/
+.pytest_cache/
