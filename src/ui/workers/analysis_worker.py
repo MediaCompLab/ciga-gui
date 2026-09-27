@@ -1,5 +1,6 @@
 from PySide6.QtCore import QThread, Signal
 from contextlib import contextmanager
+import importlib
 import pandas as pd
 
 from ciga import TGraph
@@ -7,9 +8,28 @@ from ciga.utils import accumulate_weights
 from ciga.analysis import tgraph_degree_centrality, tgraph_betweenness_centrality, tgraph_closeness_centrality, tgraph_harmonic_centrality, tgraph_eigenvector_centrality
 from ciga.analysis.tgraph_community_analysis import tgraph_community_leiden, tgraph_community_multilevel, tgraph_community_label_propagation
 from ciga.analysis.tgraph_properties import tgraph_density, tgraph_transitivity_undirected, tgraph_is_connected, tgraph_diameter, tgraph_reciprocity
-import ciga.analysis.tgraph_centrality_analysis as tgraph_centrality_module
-import ciga.analysis.tgraph_community_analysis as tgraph_community_module
-import ciga.analysis.tgraph_properties as tgraph_properties_module
+
+# Modules whose module-level ``tqdm`` drives CIGA's per-time-step loop. CIGA 0.1.5
+# moved the loop into ``ciga.analysis._sequential``; earlier releases ran it in each
+# analysis module. Whichever of these exist and hold a ``tqdm`` get the GUI hook.
+TQDM_HOST_MODULES = (
+    "ciga.analysis._sequential",
+    "ciga.analysis.tgraph_centrality_analysis",
+    "ciga.analysis.tgraph_community_analysis",
+    "ciga.analysis.tgraph_properties",
+)
+
+
+def _tqdm_hosts():
+    hosts = []
+    for name in TQDM_HOST_MODULES:
+        try:
+            module = importlib.import_module(name)
+        except ImportError:
+            continue
+        if hasattr(module, "tqdm"):
+            hosts.append(module)
+    return hosts
 
 class AnalysisWorker(QThread):
     finished = Signal(object, object)  # df_final, error_message
@@ -72,6 +92,23 @@ class AnalysisWorker(QThread):
         )
         return TGraph(data=decayed_data, positions=positions, directed=self.tgraph.is_directed)
 
+    def _undirected(self, tgraph):
+        """Undirected projection for metrics igraph/CIGA only define on undirected graphs.
+
+        Louvain (multilevel) and undirected transitivity reject directed graphs, and the
+        GUI builds directed graphs by default, so they run on the same interactions with
+        direction dropped instead of failing the whole analysis.
+        """
+        if not tgraph.is_directed:
+            return tgraph
+        if getattr(self, '_undirected_cache', None) is None:
+            self._undirected_cache = TGraph(
+                data=tgraph.data.reset_index(),
+                positions=tuple(tgraph._position),
+                directed=False,
+            )
+        return self._undirected_cache
+
     def _emit_metric_progress(self, metric_index, total_metrics, completed_steps, total_steps, metric_name):
         if total_metrics <= 0:
             return
@@ -91,8 +128,11 @@ class AnalysisWorker(QThread):
 
     @contextmanager
     def _sync_ciga_tqdm(self, metric_name, metric_index, total_metrics):
-        modules = (tgraph_centrality_module, tgraph_community_module, tgraph_properties_module)
-        originals = [(module, module.tqdm) for module in modules]
+        originals = [(module, module.tqdm) for module in _tqdm_hosts()]
+        if not originals:
+            # Unknown CIGA layout: metrics still run, with per-metric progress only.
+            yield
+            return
         fallback_tqdm = originals[0][1]
 
         def gui_tqdm(iterable=None, *args, **kwargs):
@@ -242,7 +282,7 @@ class AnalysisWorker(QThread):
                 self.progress.emit(int((current_step / total_metrics) * 100), "Calculating Multilevel Community...")
                 with self._sync_ciga_tqdm("Multilevel Community", current_step, total_metrics):
                     res = tgraph_community_multilevel(
-                        analysis_tgraph,
+                        self._undirected(analysis_tgraph),
                         **self._scope_kwargs(),
                         w_normalized=self.w_normalized,
                         mean_weight=self.mean_weight,
@@ -279,7 +319,7 @@ class AnalysisWorker(QThread):
                 self.progress.emit(int((current_step / total_metrics) * 100), "Calculating Transitivity...")
                 with self._sync_ciga_tqdm("Transitivity", current_step, total_metrics):
                     res = tgraph_transitivity_undirected(
-                        analysis_tgraph,
+                        self._undirected(analysis_tgraph),
                         **self._scope_kwargs(),
                         w_normalized=self.w_normalized,
                         mean_weight=self.mean_weight,

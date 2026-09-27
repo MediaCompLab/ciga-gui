@@ -13,8 +13,8 @@ if os.path.exists('build'): shutil.rmtree('build')
 if os.path.exists('dist'): shutil.rmtree('dist')
 if os.path.exists(f'{APP_NAME}.spec'): os.remove(f'{APP_NAME}.spec')
 
-# Make sure ciga package can be found? 
-# Pyinstaller might need --paths=.. to find 'ciga' correctly if it's external, or we package ciga with it.
+# `ciga` is bundled from the environment (pip install -r requirements.txt);
+# --paths=.. additionally finds it when this repo sits inside a CIGA checkout.
 PyInstaller.__main__.run([
     'src/main.py',
     f'--name={APP_NAME}',
@@ -22,9 +22,9 @@ PyInstaller.__main__.run([
     '--onedir',
     '--clean',
     '--paths=..',
-    '--icon=../logo_black.png',
-    f'--add-data=../logo_black.png{os.pathsep}.',
-    f'--add-data=../logo_white.png{os.pathsep}.',
+    '--icon=assets/logo_black.png',
+    f'--add-data=assets/logo_black.png{os.pathsep}.',
+    f'--add-data=assets/logo_white.png{os.pathsep}.',
     '--collect-all=PySide6',
     '--collect-all=shiboken6',
     '--collect-all=ciga',

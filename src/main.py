@@ -3,9 +3,10 @@ import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
-# Add CIGA root to sys.path so ciga imports work
 current_dir = os.path.dirname(os.path.abspath(__file__))
 ciga_gui_root = os.path.dirname(current_dir)
+# Fallback for a checkout nested inside the CIGA repository: an installed `ciga`
+# package still wins because the parent directory is appended, not prepended.
 ciga_root = os.path.dirname(ciga_gui_root)
 if ciga_root not in sys.path:
     sys.path.append(ciga_root)
@@ -15,11 +16,7 @@ from src.ui.main_window import MainWindow
 def get_resource_path(filename):
     if hasattr(sys, "_MEIPASS"):
         return os.path.join(sys._MEIPASS, filename)
-    else:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        ciga_gui_root = os.path.dirname(current_dir)
-        ciga_root = os.path.dirname(ciga_gui_root)
-        return os.path.join(ciga_root, filename)
+    return os.path.join(ciga_gui_root, "assets", filename)
 
 def main():
     app = QApplication(sys.argv)
