@@ -72,28 +72,35 @@ def test_progress_reports_individual_time_steps():
     assert step_messages[-1] == "Degree Centrality: 5/5 time steps"
 
 
-def test_progress_hook_is_restored_after_analysis():
-    import ciga.analysis._sequential as sequential
+def _hooked_tqdms():
+    # Whichever modules this ciga release runs its time-step loop in.
+    import src.ui.workers.analysis_worker as worker_module
 
-    original = sequential.tqdm
+    hosts = worker_module._tqdm_hosts()
+    assert hosts, "no tqdm host found in the installed ciga"
+    return {module: module.tqdm for module in hosts}
+
+
+def test_progress_hook_is_restored_after_analysis():
+    originals = _hooked_tqdms()
+
     _run_analysis(_build_tgraph(), ["degree"])
 
-    assert sequential.tqdm is original
+    assert all(module.tqdm is original for module, original in originals.items())
 
 
 def test_progress_hook_is_restored_when_a_metric_fails(monkeypatch):
-    import ciga.analysis._sequential as sequential
     import src.ui.workers.analysis_worker as worker_module
 
     def broken(*args, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(worker_module, "tgraph_degree_centrality", broken)
-    original = sequential.tqdm
+    originals = _hooked_tqdms()
     result, _ = _run_analysis(_build_tgraph(), ["degree"])
 
     assert result["error"] == "boom"
-    assert sequential.tqdm is original
+    assert all(module.tqdm is original for module, original in originals.items())
 
 
 def test_metrics_still_run_when_no_progress_hook_is_found(monkeypatch):
