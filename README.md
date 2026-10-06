@@ -21,7 +21,7 @@
 ### Option 1: Portable Release (For Standard Users)
 If you don't want to configure Python environments, simply download the pre-packaged release:
 1. Go to the **Releases** page of this repository.
-2. Download the `CIGA-GUI-Windows-Portable.zip` file.
+2. Download the `CIGA-GUI.zip` file.
 3. Extract the ZIP file anywhere on your computer.
 4. Double-click `CIGA-GUI.exe` inside the extracted folder to run the application immediately. No installation or Python environment is required!
 
@@ -47,6 +47,13 @@ If you already have Python installed and prefer running from the source code:
 
 ## Development
 
+Annotator CSV files automatically select `speakers` as Source and `listeners` as Target.
+The numeric `position` column exported by current Annotator versions preserves subtitle
+order, including gaps from uncoded lines. For older exports, leave **Auto position if
+missing** checked to use row order. Subtitle strings such as `00:00:01,000` are retained
+as data and are not automatically selected as numeric graph positions. The singular
+`Speaker`/`Listener` and `source`/`target` column names remain supported.
+
 Install the test and build tools, then run the headless worker tests:
 
 ```bash
@@ -67,6 +74,9 @@ python build.py
 ```
 
 After the build completes, a directory will be generated at `dist/CIGA-GUI`.
-You can ZIP this entire directory and distribute it to users. 
+The build also creates `dist/CIGA-GUI.zip` and records bundled CIGA, Python and Qt
+versions in `dist/CIGA-GUI/build-info.json`. Distribute the ZIP or the entire directory.
 
-*Note: The build uses PyInstaller in directory mode (`--onedir`). We intentionally avoid `--onefile` mode because compressing heavy ML libraries (like PyTorch) into a single executable results in extremely slow startup times for end-users. The distributed directory ensures the application launches instantly.*
+*Note: The build uses PyInstaller in directory mode (`--onedir`) so Qt WebEngine
+and scientific libraries do not need to be extracted on every launch. Qt's build
+hooks collect the modules and plugins used by the app.*

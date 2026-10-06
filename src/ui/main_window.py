@@ -439,15 +439,21 @@ class MainWindow(QMainWindow):
                 self.list_position.addItems(columns)
                 
                 # Attempt to auto-select common columns if they exist
-                lower_cols = [c.lower() for c in columns]
-                if 'speaker' in lower_cols:
-                    self.cb_source.setCurrentIndex(lower_cols.index('speaker') + 1)
-                if 'listener' in lower_cols:
-                    self.cb_target.setCurrentIndex(lower_cols.index('listener') + 1)
+                lower_cols = [c.strip().casefold() for c in columns]
+                for combo, aliases in (
+                    (self.cb_source, ('speaker', 'speakers', 'source')),
+                    (self.cb_target, ('listener', 'listeners', 'target', 'targets')),
+                ):
+                    for alias in aliases:
+                        if alias in lower_cols:
+                            combo.setCurrentIndex(lower_cols.index(alias) + 1)
+                            break
                     
                 # For position, try common temporal/order columns first.
                 for i, col in enumerate(lower_cols):
-                    if 'scene' in col or 'time' in col or 'position' in col:
+                    if (('scene' in col or 'time' in col or 'position' in col
+                         or col in ('season', 'episode'))
+                            and pd.api.types.is_numeric_dtype(self.df_raw[columns[i]])):
                         self.list_position.item(i).setSelected(True)
 
                 self.btn_build_graph.setEnabled(True)
